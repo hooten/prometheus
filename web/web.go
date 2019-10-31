@@ -69,8 +69,6 @@ import (
 )
 
 var (
-	localhostRepresentations = []string{"127.0.0.1", "localhost"}
-
 	// Paths that are handled by the React / Reach router that should all be served the main React app's index.html.
 	reactAppPaths = []string{
 		"/",
@@ -310,6 +308,8 @@ func New(logger log.Logger, o *Options) *Handler {
 		h.options.RemoteReadConcurrencyLimit,
 		h.options.RemoteReadBytesInFrame,
 		h.options.CORSOrigin,
+		h.options.ListenAddress,
+		h.options.ExternalURL,
 	)
 
 	if o.RoutePrefix != "/" {
@@ -875,44 +875,7 @@ func tmplFuncs(consolesPath string, opts *Options) template_text.FuncMap {
 		"pathPrefix":   func() string { return opts.ExternalURL.Path },
 		"pageTitle":    func() string { return opts.PageTitle },
 		"buildVersion": func() string { return opts.Version.Revision },
-		"globalURL": func(u *url.URL) *url.URL {
-			host, port, err := net.SplitHostPort(u.Host)
-			if err != nil {
-				return u
-			}
-			for _, lhr := range localhostRepresentations {
-				if host == lhr {
-					_, ownPort, err := net.SplitHostPort(opts.ListenAddress)
-					if err != nil {
-						return u
-					}
-
-					if port == ownPort {
-						// Only in the case where the target is on localhost and its port is
-						// the same as the one we're listening on, we know for sure that
-						// we're monitoring our own process and that we need to change the
-						// scheme, hostname, and port to the externally reachable ones as
-						// well. We shouldn't need to touch the path at all, since if a
-						// path prefix is defined, the path under which we scrape ourselves
-						// should already contain the prefix.
-						u.Scheme = opts.ExternalURL.Scheme
-						u.Host = opts.ExternalURL.Host
-					} else {
-						// Otherwise, we only know that localhost is not reachable
-						// externally, so we replace only the hostname by the one in the
-						// external URL. It could be the wrong hostname for the service on
-						// this port, but it's still the best possible guess.
-						host, _, err := net.SplitHostPort(opts.ExternalURL.Host)
-						if err != nil {
-							return u
-						}
-						u.Host = host + ":" + port
-					}
-					break
-				}
-			}
-			return u
-		},
+		"globalURL":    api_v1.GlobalURLFn(opts.ListenAddress, opts.ExternalURL),
 		"numHealthy": func(pool []*scrape.Target) int {
 			alive := len(pool)
 			for _, p := range pool {

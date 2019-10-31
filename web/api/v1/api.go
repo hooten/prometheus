@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -154,6 +155,8 @@ type API struct {
 	remoteReadMaxBytesInFrame int
 	remoteReadGate            *gate.Gate
 	CORSOrigin                *regexp.Regexp
+	listenAddress             string
+	externalURL               *url.URL
 }
 
 func init() {
@@ -178,6 +181,8 @@ func NewAPI(
 	remoteReadConcurrencyLimit int,
 	remoteReadMaxBytesInFrame int,
 	CORSOrigin *regexp.Regexp,
+	listenAddress string,
+	externalURL *url.URL,
 ) *API {
 	return &API{
 		QueryEngine:           qe,
@@ -197,6 +202,8 @@ func NewAPI(
 		remoteReadMaxBytesInFrame: remoteReadMaxBytesInFrame,
 		logger:                    logger,
 		CORSOrigin:                CORSOrigin,
+		listenAddress:             listenAddress,
+		externalURL:               externalURL,
 	}
 }
 
@@ -521,6 +528,53 @@ func (api *API) dropSeries(r *http.Request) apiFuncResult {
 	return apiFuncResult{nil, &apiError{errorInternal, errors.New("not implemented")}, nil, nil}
 }
 
+var (
+	localhostRepresentations = []string{"127.0.0.1", "localhost"}
+)
+
+// GlobalURLFn returns a function that returns the global url of a url instance
+func GlobalURLFn(listenAddress string, externalURL *url.URL) func(u *url.URL) *url.URL {
+
+	return func(u *url.URL) *url.URL {
+		host, port, err := net.SplitHostPort(u.Host)
+		if err != nil {
+			return u
+		}
+		for _, lhr := range localhostRepresentations {
+			if host == lhr {
+				_, ownPort, err := net.SplitHostPort(listenAddress)
+				if err != nil {
+					return u
+				}
+
+				if port == ownPort {
+					// Only in the case where the target is on localhost and its port is
+					// the same as the one we're listening on, we know for sure that
+					// we're monitoring our own process and that we need to change the
+					// scheme, hostname, and port to the externally reachable ones as
+					// well. We shouldn't need to touch the path at all, since if a
+					// path prefix is defined, the path under which we scrape ourselves
+					// should already contain the prefix.
+					u.Scheme = (*externalURL).Scheme
+					u.Host = (*externalURL).Host
+				} else {
+					// Otherwise, we only know that localhost is not reachable
+					// externally, so we replace only the hostname by the one in the
+					// external URL. It could be the wrong hostname for the service on
+					// this port, but it's still the best possible guess.
+					host, _, err := net.SplitHostPort((*externalURL).Host)
+					if err != nil {
+						return u
+					}
+					u.Host = host + ":" + port
+				}
+				break
+			}
+		}
+		return u
+	}
+}
+
 // Target has the information for one target.
 type Target struct {
 	// Labels before any processing.
@@ -528,7 +582,8 @@ type Target struct {
 	// Any labels that are added to this target and its metrics.
 	Labels map[string]string `json:"labels"`
 
-	ScrapeURL string `json:"scrapeUrl"`
+	ScrapeURL       string `json:"scrapeUrl"`
+	GlobalScrapeURL string `json:"globalScrapeUrl"`
 
 	LastError          string              `json:"lastError"`
 	LastScrape         time.Time           `json:"lastScrape"`
@@ -574,11 +629,12 @@ func (api *API) targets(r *http.Request) apiFuncResult {
 		if lastErr != nil {
 			lastErrStr = lastErr.Error()
 		}
-
+		globalURL := GlobalURLFn(api.listenAddress, api.externalURL)
 		res.ActiveTargets = append(res.ActiveTargets, &Target{
 			DiscoveredLabels:   target.DiscoveredLabels().Map(),
 			Labels:             target.Labels().Map(),
 			ScrapeURL:          target.URL().String(),
+			GlobalScrapeURL:    globalURL(target.URL()).String(),
 			LastError:          lastErrStr,
 			LastScrape:         target.LastScrape(),
 			LastScrapeDuration: target.LastScrapeDuration(),

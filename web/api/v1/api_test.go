@@ -243,6 +243,11 @@ func TestEndpoints(t *testing.T) {
 
 		algr.RuleGroups()
 
+		externalURL := &url.URL{
+			Scheme: "http",
+			Host:   "myhost:7000",
+		}
+
 		api := &API{
 			Queryable:             suite.Storage(),
 			QueryEngine:           suite.QueryEngine(),
@@ -253,6 +258,8 @@ func TestEndpoints(t *testing.T) {
 			config:                func() config.Config { return samplePrometheusCfg },
 			ready:                 func(f http.HandlerFunc) http.HandlerFunc { return f },
 			rulesRetriever:        algr,
+			listenAddress:         "localhost:9090",
+			externalURL:           externalURL,
 		}
 
 		testEndpoints(t, api, true)
@@ -305,6 +312,11 @@ func TestEndpoints(t *testing.T) {
 
 		algr.RuleGroups()
 
+		externalURL := &url.URL{
+			Scheme: "http",
+			Host:   "myhost:7000",
+		}
+
 		api := &API{
 			Queryable:             remote,
 			QueryEngine:           suite.QueryEngine(),
@@ -315,6 +327,8 @@ func TestEndpoints(t *testing.T) {
 			config:                func() config.Config { return samplePrometheusCfg },
 			ready:                 func(f http.HandlerFunc) http.HandlerFunc { return f },
 			rulesRetriever:        algr,
+			listenAddress:         "localhost:9090",
+			externalURL:           externalURL,
 		}
 
 		testEndpoints(t, api, false)
@@ -704,6 +718,7 @@ func testEndpoints(t *testing.T, api *API, testLabelAPI bool) {
 							"job": "blackbox",
 						},
 						ScrapeURL:          "http://localhost:9115/probe?target=example.com",
+						GlobalScrapeURL:    "http://myhost:9115/probe?target=example.com",
 						Health:             "down",
 						LastError:          "failed",
 						LastScrape:         scrapeStart,
@@ -715,6 +730,7 @@ func testEndpoints(t *testing.T, api *API, testLabelAPI bool) {
 							"job": "test",
 						},
 						ScrapeURL:          "http://example.com:8080/metrics",
+						GlobalScrapeURL:    "http://example.com:8080/metrics",
 						Health:             "up",
 						LastError:          "",
 						LastScrape:         scrapeStart,
